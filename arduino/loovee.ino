@@ -1,4 +1,5 @@
 // Loovee @ 2015-8-26
+#include <Arduino.h>
 #include <math.h>
 const int B = 4275000; // B value of the thermistor
 const int R0 = 100000; // R0 = 100k
