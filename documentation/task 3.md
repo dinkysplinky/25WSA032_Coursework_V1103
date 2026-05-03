@@ -8,7 +8,7 @@ The code base contains several key python modules which you will use in your own
 - bots
 - factory
 
-Your code will import these module or object from them. A code module which uses these is available to study and run. 
+Your code will import these module or objects from them. A code module which uses these is available to study and run. 
 
 ## **The Ecosystem**
 
