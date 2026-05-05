@@ -4,7 +4,6 @@
 const int B = 4275000; // B value of the thermistor
 int R0 = 100000; // R0 = 100k
 const int pinTempSensor = A0; // Grove - Temperature Sensor connect to A0
-float temperature;
 unsigned long current_time;
 
 const int reading_interval_period = 100;//define a sample collection interval 
