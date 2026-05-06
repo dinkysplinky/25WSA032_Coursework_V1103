@@ -1,89 +1,145 @@
 // Loovee @ 2015-8-26
 #include <Arduino.h>
 #include <math.h>
-const int B = 4275000; // B value of the thermistor
+const int B = 4275; // B value of the thermistor
 int R0 = 100000; // R0 = 100k
 const int pinTempSensor = A0; // Grove - Temperature Sensor connect to A0
-unsigned long current_time;
 
-const int reading_interval_period = 100;//define a sample collection interval 
-const float sampling_freq = 1000/ reading_interval_period;
+int reading_interval_period = 100;//define a sample collection interval 
+float sampling_freq = 1000/ reading_interval_period;
+const int array_size = 64;
 
-unsigned long prev_reading_time = 0;
-const int array_size = 100;
-float reading_array[array_size];
 int i;//defines the sample number of the data in the array
+float reading_array[array_size];
+float magnitude[array_size];            
+float frequency[array_size];    
 
-float X_real[array_size];            // dft real components
-float X_imag[array_size];            // dft imaginary components
+const float F_MAX = 0.6;
 
-void collect_temperature_data() {//define a new function to collect data from the sensor and calculate temp 
+int mode;
 
-  while(current_time <= (array_size + 1) * reading_interval_period){//determine when to collect data using millis clock 
-    current_time = millis();
-     if(prev_reading_time + reading_interval_period < current_time){//check if enough time has passed to take a reading 
-      int a = analogRead(pinTempSensor);
-      float R = 1023.0/a-1.0;
-      R = R0*R;
-      temperature = 1.0/(log(R/R0)/B+1/298.15)-273.15; // convert to temperature via datasheet
-      reading_array[i] = temperature;
-      Serial.println(reading_array[i]);
-      i++;
-      prev_reading_time = current_time;}}//reset prev time for next loop
-    
-    for (int j = 0; j < array_size; j++) {//prints out the whole array 
-        Serial.print("Reading ");
-        Serial.print(j+1);
-        Serial.print(": ");
-        Serial.println(reading_array[j]);}
+#define ACTIVE 0 
+#define IDLE 1
+#define POWER_DOWN 2
+
+
+
+void collect_temperature_data(){//define a new function to collect data from the sensor and calculate temp 
+
+    unsigned long prev = millis() - reading_interval_period;
+    int i = 0;
+ 
+    while (i < array_size) {
+        unsigned long now = millis();
+        if (now - prev >= (unsigned long)reading_interval_period) {
+            int   a = analogRead(pinTempSensor);
+            float R = 1023.0 / a - 1.0;
+            R = R0 * R;
+            float tempurature = 1.0 / (log(R / R0) / B + 1.0 / 298.15) - 273.15;
+            reading_array[i++] = tempurature;
+            prev = now;
+            Serial.print(i);
+            Serial.print(": ");
+            Serial.println(tempurature);
+        }
+    }
+      Serial.println("Finished data collection");
 }
 
-void apply_dft() {//define a new function to apply dft to the collected temp data
-    for (int k = 0; k < array_size; k++) {          // For each frequency bin
-    X_real[k] = 0.0;
-    X_imag[k] = 0.0;
-
-    for (int n = 0; n < array_size; n++) {        // Sum over all samples
-      float angle = 2.0 * PI * k * n / array_size;
-      X_real[k] +=  reading_array[n] * cos(angle);
-      X_imag[k] += -reading_array[n] * sin(angle);
+float* apply_dft() {//define a new function to apply dft to the collected temp data
+    sampling_freq = 1000/ reading_interval_period;
+    float mean = 0.0;
+    for (int i = 0; i < array_size; i++) mean += reading_array[i];
+    mean /= array_size;
+    for (int k = 0; k < array_size; k++) {
+        float X_real = 0.0;
+        float X_imag = 0.0;
+ 
+        for (int n = 0; n < array_size; n++) {                       // Eq. 3.1
+            float angle = 2.0 * PI * k * n / array_size;
+            float xn    = reading_array[n] - mean;   
+            X_real +=  reading_array[n] * cos(angle);       // Eq. 3.3
+            X_imag += -reading_array[n] * sin(angle);       // Eq. 3.4
+        }
+ 
+        magnitude[k] = sqrt(X_real * X_real + X_imag * X_imag);               // Eq. 3.5
+        frequency[k] = ((float)k * sampling_freq) / array_size;      // Eq. 3.2
     }
-  }
+    return frequency;
+}
 
-    // --- Compute and print the magnitude of each frequency bin ---
-  //float sampleRate = 1000.0;  // Hz — must match your actual sample interval
-  float freqResolution = reading_interval_period / array_size;
+void send_data_to_pc() {
+    float sample_period = reading_interval_period / 1000.0;   // ssss
+ 
+    Serial.println(F("Time,Temperature,Frequency,Magnitude"));
+    for (int i = 0; i < array_size; i++) {
+        Serial.print(i * sample_period, 4);
+        Serial.print(F(","));
+        Serial.print(reading_array[i], 2);
+        Serial.print(F(","));
+        Serial.print(frequency[i], 4);
+        Serial.print(F(","));
+        Serial.println(magnitude[i], 4);
+    }
+}
 
-  Serial.println("Bin\tFrequency(Hz)\tMagnitude");
-  for (int k = 0; k < array_size / 2; k++) {   // Only first N/2 bins are meaningful
-    float magnitude = sqrt(X_real[k] * X_real[k] + X_imag[k] * X_imag[k]);
-    float frequency = k * freqResolution;
-    Serial.print(k);
-    Serial.print("\t");
-    Serial.print(frequency);
-    Serial.print("\t\t");
-    Serial.println(magnitude);
-  }
-
-
+int decide_power_mode() {
+    float w = 0.0;
+    float m = 0.0;
+    float bins_used = 0;
+ 
+    for (int k = 1; k < array_size / 2; k++) {
+        w += frequency[k] * magnitude[k];
+        m += magnitude[k];
+        bins_used++;
+    }
+ 
+    float avg = (m > 0.0) ? (w / m) : 0.0;
+ 
+    Serial.print(F("Centroid over [0, "));
+    Serial.print(F_MAX, 2);
+    Serial.print(F("] Hz across "));
+    Serial.print(bins_used);
+    Serial.print(F(" bins = "));
+    Serial.print(avg, 4);
+    Serial.println(F(" Hz"));
+ 
+    if (avg > 0.5)      return ACTIVE;
+    else if (avg > 0.1) return IDLE;
+    else                return POWER_DOWN;
 }
 
 
 void setup()
 {
   Serial.begin(9600);
+  mode = ACTIVE;
   Serial.println("Serial setup complete");
 }
 
-void loop()
-{
-  current_time = millis();
-
+void loop(){
   collect_temperature_data();
-
-  Serial.println("Finished data collection");
 
   apply_dft();
 
-  delay(500000);
+  send_data_to_pc();
+
+  mode = decide_power_mode();
+
+  switch (mode) {
+        case ACTIVE:    
+        Serial.println(F("Mode: ACTIVE"));
+        reading_interval_period = 100;     
+        break;
+
+        case IDLE:      
+        Serial.println(F("Mode: IDLE"));
+        reading_interval_period = 500;       
+        break;
+        
+        case POWER_DOWN:
+        Serial.println(F("Mode: POWER_DOWN"));
+        reading_interval_period = 3000; 
+        break;
+    }
  }
