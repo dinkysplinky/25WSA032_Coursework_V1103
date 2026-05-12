@@ -95,7 +95,6 @@ int decide_power_mode() {
     }
  
     float avg = (m > 0.0) ? (w / m) : 0.0;
- 
     Serial.print(F("Centroid over [0, "));
     Serial.print(F_MAX, 2);
     Serial.print(F("] Hz across "));
