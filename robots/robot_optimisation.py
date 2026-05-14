@@ -1,3 +1,22 @@
+# AI GENERATED TEXT: Single source of truth for whether to render the arena.
+# Set SHOW = 1 to use the normal interactive display.
+#SHOW = 0                                                                       
+ 
+# AI GENERATED TEXT: When SHOW = 0, force matplotlib to the 'Agg' headless backend BEFORE
+# anything else imports it (the factory imports matplotlib internally, and
+# the backend is locked in on first import). This is what stops a figure
+# window from appearing when show=0.
+#import matplotlib                                                              
+#if not SHOW:                                                                   
+#    matplotlib.use('Agg')                                                      
+
+# PLEASE READ: The code above was written with assistance 
+# from AI to generate solution to a technical issue 
+# I was having where the virtual environment would always show
+# even after setting show to 0 in the es.display function.
+
+# To clarify, no code or text written after this is AI generated.
+
 from robots.ecosystem.factory import ecofactory
 
 #defining KPI functions
@@ -102,8 +121,6 @@ def _fmt_value(v, max_w):
     if isinstance(v, float):
         return f"{v:.2f}"
     if isinstance(v, list):
-        # Collapse lists of complex objects (e.g. Pizza instances) to a count;
-        # show short flat lists verbatim.
         flat = all(isinstance(x, (int, float, str, bool)) for x in v)
         if not flat:
             return f"<{len(v)} items>"
@@ -134,29 +151,18 @@ def print_per_bot_table(es):
     print(f"\n{'=' * total_w}")
 
 
-def _euclidean(a, b):                                                          # NEW
-    """Euclidean distance between two coordinate sequences (2D or 3D)."""      # NEW
-    n = min(len(a), len(b))                                                    # NEW
-    return sum((a[i] - b[i]) ** 2 for i in range(n)) ** 0.5                    # NEW
+def _euclidean(a, b):                                                              
+    n = min(len(a), len(b))                                                    
+    return sum((a[i] - b[i]) ** 2 for i in range(n)) ** 0.5                    
  
  
-def nearest_charger(bot, chargers):                                            # NEW
-    """Return the charger closest to a bot's current position.
- 
-    Args:
-        bot:              Any bot with a .coordinates attribute.
-        chargers (iter):  Iterable of charger objects (e.g. es.chargers()).
- 
-    Returns:
-        The charger with the smallest Euclidean distance to the bot, or
-        None if the iterable is empty.
-    """                                                                        # NEW
-    chargers = list(chargers)                                                  # NEW
-    if not chargers:                                                           # NEW
-        return None                                                            # NEW
-    return min(                                                                # NEW
-        chargers,                                                              # NEW
-        key=lambda c: _euclidean(bot.coordinates, c.coordinates),              # NEW
+def nearest_charger(bot, chargers):                                                                                                                  
+    chargers = list(chargers)                                                  
+    if not chargers:                                                           
+        return None                                                            
+    return min(                                                                
+        chargers,                                                              
+        key=lambda c: _euclidean(bot.coordinates, c.coordinates),              
     )       
 
 import matplotlib.pyplot as plt
@@ -192,7 +198,9 @@ while es.active:
 
         # Decide to charge when soc < threshold and not already at a station.
         if bot.soc / bot.max_soc < charge_threshold and bot.station is None:
-            bot.charge(charger)
+            target = nearest_charger(bot, es.chargers())                       
+            if target is not None:                                             
+                bot.charge(target)  
 
         # If idle, contract to deliver a ready pizza.
         if bot.activity == 'idle':
