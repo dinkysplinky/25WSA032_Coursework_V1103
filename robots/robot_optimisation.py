@@ -165,6 +165,31 @@ def nearest_charger(bot, chargers):
         key=lambda c: _euclidean(bot.coordinates, c.coordinates),
     )
 
+OPPORTUNISTIC_CHARGE_RADIUS = 10.0                                              
+OPPORTUNISTIC_CHARGE_SOC    = 0.3                                            
+ 
+ 
+def try_opportunistic_charge(bot, chargers):                                   
+                                                                  
+    if bot.station is not None:                                                
+        return False                                                           
+    if not bot.max_soc:                                                        
+        return False                                                           
+    if bot.soc / bot.max_soc >= OPPORTUNISTIC_CHARGE_SOC:                      
+        return False                                                           
+                                                                               
+    target = nearest_charger(bot, chargers)                                    
+    if target is None:                                                         
+        return False                                                           
+    if _euclidean(bot.coordinates, target.coordinates) > \
+            OPPORTUNISTIC_CHARGE_RADIUS:                                       
+        return False                                                           
+                                                                               
+    bot.charge(target)                                                         
+    return True                                                                
+
+
+
 
 # Payload utilisation tuning. Stop loading once the bot is at or above
 # this fraction of its max_payload - leaves a small safety margin so a
@@ -236,6 +261,8 @@ while es.active:
             target = nearest_charger(bot, es.chargers())
             if target is not None:
                 bot.charge(target)
+        else:                                                                   
+            try_opportunistic_charge(bot, es.chargers())   
 
         # If idle, contract to deliver a ready pizza.
         if bot.activity == 'idle':
@@ -255,4 +282,4 @@ kpis = collect_kpis(es, label="Baseline")
 print_kpi_table([kpis], title="Bot Delivery KPI Summary")
 
 # Per-bot detailed breakdown
-print_per_bot_table(es)
+#print_per_bot_table(es)
