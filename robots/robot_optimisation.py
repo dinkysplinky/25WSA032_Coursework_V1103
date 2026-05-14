@@ -1,51 +1,218 @@
-"""
-robot ecosystem operation code
-
-This module creates a test ecosystem and runs it for a specified duration, 
-demonstrating the use of the ecosystem factory and deliverable creation functions
-It simulates the operation of delivery bots, including charging and delivering pizzas, while providing options for debugging and message display.
-"""
-
 from robots.ecosystem.factory import ecofactory
 
-# Duration is set to two weeks for development and rapid testing. Set to 52 weeks for your final tests.
+#defining KPI functions
+
+def collect_kpis(es, label="Run"):
+    bots = es.bots()
+
+    total_units    = sum(b.units_delivered  for b in bots)
+    total_weight   = sum(b.weight_delivered for b in bots)
+    total_distance = sum(b.distance         for b in bots)
+    total_energy   = sum(b.energy           for b in bots)
+    broken_count   = sum(1 for b in bots if b.status == 'broken')
+    active_hours   = sum(b.active           for b in bots)
+
+    # Derived efficiency KPIs - guard against zero denominators on short runs
+    kg_per_unit  = total_weight / max(total_distance, 0.001)
+    units_per_hr = total_units  / max(active_hours,   0.001)
+
+    return {
+        'label':           label,
+        'units_delivered': total_units,
+        'weight_kg':       round(total_weight,   1),
+        'distance':        round(total_distance, 1),
+        'energy_kWh':      round(total_energy,   1),
+        'broken_bots':     broken_count,
+        'active_hours':    active_hours,
+        'kg_per_unit':     round(kg_per_unit,  4),
+        'units_per_hr':    round(units_per_hr, 4),
+    }
+
+
+def print_kpi_table(results, title="Bot KPI Summary"):
+    kpis = [
+        ("Units delivered", "units_delivered", True),
+        ("Weight (kg)",     "weight_kg",       True),
+        ("Distance",        "distance",        None),
+        ("Energy (kWh)",    "energy_kWh",      False),
+        ("Broken bots",     "broken_bots",     False),
+        ("Active hrs",      "active_hours",    None),
+        ("kg / dist",       "kg_per_unit",     True),
+        ("Units / hr",      "units_per_hr",    True),
+    ]
+    label_w, val_w, delta_w = 18, 10, 9
+    total_w = label_w + val_w + delta_w
+
+    print(f"\n{'=' * total_w}")
+    print(f"{title:^{total_w}}")
+    print("=" * total_w)
+
+    baseline = results[0] if results else None
+    for i, r in enumerate(results):
+        tag = r['label'] if i == 0 else f"{r['label']} vs {baseline['label']}"
+        print(f"\n-- {tag} --")
+        for name, key, _better in kpis:
+            v = r.get(key, '-')
+            v_str = f"{v:.2f}" if isinstance(v, float) else f"{v}"
+            line  = f"{name:<{label_w}}{v_str:>{val_w}}"
+            if i > 0:
+                base = baseline.get(key, 0) or 0.0001
+                pct  = (r.get(key, 0) - base) / abs(base) * 100
+                sign = "+" if pct >= 0 else ""
+                line += f"{f'{sign}{pct:.1f}%':>{delta_w}}"
+            print(line)
+    print("=" * total_w)
+
+_BOT_FIELD_GROUPS = [
+    ("Identity",  [("name",         "name"),
+                   ("kind",         "kind"),
+                   ("class",        "kind_class"),
+                   ("status",       "status"),
+                   ("activity",     "activity"),
+                   ("age",          "age")]),
+    ("Position",  [("coords",       "coordinates"),
+                   ("on_arena",     "on_arena"),
+                   ("destination",  "destination"),
+                   ("target_dist",  "target_distance"),
+                   ("direction",    "direction"),
+                   ("distance",     "distance"),
+                   ("speed",        "speed"),
+                   ("max_speed",    "max_speed"),
+                   ("volitant",     "volitant")]),
+    ("Energy",    [("soc",          "soc"),
+                   ("max_soc",      "max_soc"),
+                   ("energy_kWh",   "energy"),
+                   ("station",      "station")]),
+    ("Delivery",  [("units",        "units_delivered"),
+                   ("weight_kg",    "weight_delivered"),
+                   ("active_hrs",   "active"),
+                   ("damage",       "damage"),
+                   ("service_freq", "service_freq"),
+                   ("serviced",     "serviced")]),
+    ("Capacity",  [("max_payload",  "max_payload"),
+                   ("payload",      "payload"),
+                   ("weight",       "weight"),
+                   ("cargo",        "cargo"),
+                   ("contracts",    "contracts"),
+                   ("resources",    "resources")]),
+]
+
+
+def _fmt_value(v, max_w):
+    if isinstance(v, float):
+        return f"{v:.2f}"
+    if isinstance(v, list):
+        # Collapse lists of complex objects (e.g. Pizza instances) to a count;
+        # show short flat lists verbatim.
+        flat = all(isinstance(x, (int, float, str, bool)) for x in v)
+        if not flat:
+            return f"<{len(v)} items>"
+        s = str(v)
+        return s if len(s) <= max_w else f"<{len(v)} items>"
+    s = str(v)
+    return s if len(s) <= max_w else s[: max_w - 3] + "..."
+
+
+def print_per_bot_table(es):
+    label_w, val_w = 14, 20
+    total_w = label_w + val_w + 2          # +2 for the "  "
+
+    print(f"\n{'=' * total_w}")
+    print(f"{'Per-Bot Detail':^{total_w}}")
+    print("=" * total_w)
+
+    for bot in sorted(es.bots(),
+                      key=lambda b: (b.kind, getattr(b, 'name', ''))):
+        name = getattr(bot, 'name', '?')
+        print(f"\n{f' {name} ':-^{total_w}}")
+        for section, fields in _BOT_FIELD_GROUPS:
+            print(f"  [{section}]")
+            for label, attr in fields:
+                raw = getattr(bot, attr, "-")
+                v_str = _fmt_value(raw, val_w)
+                print(f"  {label:<{label_w}}{v_str:>{val_w}}")
+    print(f"\n{'=' * total_w}")
+
+
+def _euclidean(a, b):                                                          # NEW
+    """Euclidean distance between two coordinate sequences (2D or 3D)."""      # NEW
+    n = min(len(a), len(b))                                                    # NEW
+    return sum((a[i] - b[i]) ** 2 for i in range(n)) ** 0.5                    # NEW
+ 
+ 
+def nearest_charger(bot, chargers):                                            # NEW
+    """Return the charger closest to a bot's current position.
+ 
+    Args:
+        bot:              Any bot with a .coordinates attribute.
+        chargers (iter):  Iterable of charger objects (e.g. es.chargers()).
+ 
+    Returns:
+        The charger with the smallest Euclidean distance to the bot, or
+        None if the iterable is empty.
+    """                                                                        # NEW
+    chargers = list(chargers)                                                  # NEW
+    if not chargers:                                                           # NEW
+        return None                                                            # NEW
+    return min(                                                                # NEW
+        chargers,                                                              # NEW
+        key=lambda c: _euclidean(bot.coordinates, c.coordinates),              # NEW
+    )       
 
 import matplotlib.pyplot as plt
-plt.close('all')  # optional: cleans up leftovers from prior runs
-plt.ion()         # interactive mode ON (non-blocking windows)
+plt.close('all')        # optional: cleans up leftovers from prior runs
+plt.ion()               # interactive mode ON (non-blocking windows)
 
-# Create and configure the ecosystem using the factory function. 
-# Study the factory function code to understand how the ecosystem is being created 
-# and configured. Adjust the parameters as needed for your testing and development.  
-es = ecofactory(robots = 3, droids = 3, drones = 3, chargers = [55,20], pizzas = 9)
-
+# Create and configure the ecosystem using the factory function.
+# Study the factory function code to understand how the ecosystem is being
+# created and configured. Adjust the parameters as needed for testing.
+es = ecofactory(robots=3, droids=3, drones=3, chargers=[[40, 20], [10, 10], [70, 30], [25, 40]], pizzas=9)
 
 charger = es.chargers()[0]
-es.display(show = 1, pause = 10)                                                # show = 0 will turn off the display and speed up the run. Set to 1 for development and debugging, set to 0 for final runs. Note that when show = 0, you will not see the ecosystem or any messages, so it is wise to turn on messages (es.messages_on = True) when show = 0 for development and debugging. 
-es.debug = False                                                                # this will directly display damage and warning messages. Note show needs to be zero  (show = 0)
-es.messages_on = False                                                          # over 52 weeks it is wise to turn messages off as there are too many. But when researching turn on for shorter runs
-es.duration = "10 week"                                                          # We are aiming to run for a year with minimum or no bot breakages
 
-home = [40,20, 0]                                                               # Place to which bots will return when idle and from which they will start. This is also the location of the charger in this example, but it doesn't have to be. You can change this and the charger location to test the bots' ability to navigate around the ecosystem.
-charge_threshold = 0.20                                                         # this is the soc percentage at which bots will decide to charge. This can be optimised and varied for each kind (see stretch objective)                               
+# show = 0  -> no display, fastest run; set 1 for development/debugging.
+# When show = 0 it is wise to turn messages on for shorter dev runs.
+es.display(show=1, pause=10)
+es.debug       = False                  # damage / warning messages (needs show=0)
+es.messages_on = False                  # for 52 weeks; turn on for short runs
+es.duration    = "2 week"              # aim for a year with few breakages
+
+# Home is the point bots return to when idle; also the charger location here.
+home = [40, 20, 0]
+
+# SoC percentage at which bots decide to charge. Can be optimised per kind
+# (stretch objective).
+charge_threshold = 0.20
 
 while es.active:
 
-  for bot in es.bots():
+    for bot in es.bots():
 
-    #create_deliverables(es)                                                     # Use the create deliverables function to maintain a stock of ready pizzas
+        # create_deliverables(es)   # maintain a stock of ready pizzas
 
-    if bot.soc / bot.max_soc < charge_threshold and bot.station is None:        # decision to charge when percent soc = 20%. This can be optimised and varied for each kind (see stretch objective)
-      bot.charge(charger)                                                       # initiate charging.
-    if bot.activity == 'idle':                                                  # if bot is idle, contract to deliver a ready pizza.
-      for pizza in es.deliverables():
-        if pizza.status == 'ready':
-          bot.deliver(pizza)                                                    # ensure we do not contract to deliver a pizza already contracted by another bot
-          break
-      if not bot.destination and bot.coordinates != home:
-        bot.target_destination = home                                           # if we get here, we've gone through the list of pizzas and none was ready
-    if bot.target_destination:bot.move()                                        # move whilst we have a destination. At the end of delivery, the bot status will be set to idle
-  es.update()                                                                   # update when all bots have been processed and moved
+        # Decide to charge when soc < threshold and not already at a station.
+        if bot.soc / bot.max_soc < charge_threshold and bot.station is None:
+            bot.charge(charger)
 
+        # If idle, contract to deliver a ready pizza.
+        if bot.activity == 'idle':
+            for pizza in es.deliverables():
+                if pizza.status == 'ready':
+                    bot.deliver(pizza)   # avoid contracting a pizza already taken
+                    break
+            # If no ready pizza was found, head home.
+            if not bot.destination and bot.coordinates != home:
+                bot.target_destination = home
 
-es.tabulate(kind_class='Bot')
+        # Move while we have a destination. At end of delivery the bot
+        # activity will be set back to idle.
+        if bot.target_destination:
+            bot.move()
+
+    es.update()                # update once all bots have been processed
+
+kpis = collect_kpis(es, label="Baseline")
+print_kpi_table([kpis], title="Bot Delivery KPI Summary")
+
+# Per-bot detailed breakdown
+print_per_bot_table(es)
