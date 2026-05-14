@@ -1,25 +1,9 @@
-# AI GENERATED TEXT: Single source of truth for whether to render the arena.
-# Set SHOW = 1 to use the normal interactive display.
 SHOW = 0
-
-# AI GENERATED TEXT: When SHOW = 0, force matplotlib to the 'Agg' headless backend BEFORE
-# anything else imports it (the factory imports matplotlib internally, and
-# the backend is locked in on first import). This is what stops a figure
-# window from appearing when show=0.
-#import matplotlib
-#if not SHOW:
-#    matplotlib.use('Agg')
-
-# PLEASE READ: The code above was written with assistance
-# from AI to generate solution to a technical issue
-# I was having where the virtual environment would always show
-# even after setting show to 0 in the es.display function.
-
-# To clarify, no code or text written after this is AI generated.
 
 from robots.ecosystem.factory import ecofactory
 
 #defining KPI functions
+#collects per-bot stats and returns them as a single fleet-wide dict.
 
 def collect_kpis(es, label="Run"):
     bots = es.bots()
@@ -31,7 +15,7 @@ def collect_kpis(es, label="Run"):
     broken_count   = sum(1 for b in bots if b.status == 'broken')
     active_hours   = sum(b.active           for b in bots)
 
-    # Derived efficiency KPIs - guard against zero denominators on short runs
+    # max(..., 0.001) stops a divide-by-zero on very short runs.
     kg_per_unit  = total_weight / max(total_distance, 0.001)
     units_per_hr = total_units  / max(active_hours,   0.001)
 
@@ -47,7 +31,7 @@ def collect_kpis(es, label="Run"):
         'units_per_hr':    round(units_per_hr, 4),
     }
 
-
+# Prints one or more KPI dicts. Extra dicts get a % change column vs the first.
 def print_kpi_table(results, title="Bot KPI Summary"):
     kpis = [
         ("Units delivered", "units_delivered", True),
@@ -82,6 +66,8 @@ def print_kpi_table(results, title="Bot KPI Summary"):
             print(line)
     print("=" * total_w)
 
+
+#layout for the per-bot table, each tuple is: label, attribute
 _BOT_FIELD_GROUPS = [
     ("Identity",  [("name",         "name"),
                    ("kind",         "kind"),
@@ -116,7 +102,7 @@ _BOT_FIELD_GROUPS = [
                    ("resources",    "resources")]),
 ]
 
-
+#formats one value for the per-bot table, long values get cut short
 def _fmt_value(v, max_w):
     if isinstance(v, float):
         return f"{v:.2f}"
@@ -129,7 +115,7 @@ def _fmt_value(v, max_w):
     s = str(v)
     return s if len(s) <= max_w else s[: max_w - 3] + "..."
 
-
+#prints a vertical block per bot, easier to read than the wide es.tabulate
 def print_per_bot_table(es):
     label_w, val_w = 14, 20
     total_w = label_w + val_w + 2          # +2 for the "  "
@@ -150,12 +136,12 @@ def print_per_bot_table(es):
                 print(f"  {label:<{label_w}}{v_str:>{val_w}}")
     print(f"\n{'=' * total_w}")
 
-
+#euclidean distance so that my calculations work between the 2D and 3D coordinate systems of the drones and other bots
 def _euclidean(a, b):
     n = min(len(a), len(b))
     return sum((a[i] - b[i]) ** 2 for i in range(n)) ** 0.5
 
-
+#returns the charger closest to the bot (None if there aren't any)
 def nearest_charger(bot, chargers):
     chargers = list(chargers)
     if not chargers:
@@ -168,21 +154,21 @@ def nearest_charger(bot, chargers):
 OPPORTUNISTIC_CHARGE_RADIUS = 10.0                                              
 OPPORTUNISTIC_CHARGE_SOC    = 0.3                                            
  
- 
+ #sends the bot to a nearby charger if it's running low on charge and one is close
 def try_opportunistic_charge(bot, chargers):                                   
                                                                   
-    if bot.station is not None:                                                
+    if bot.station is not None:                                     # already charging           
         return False                                                           
     if not bot.max_soc:                                                        
         return False                                                           
-    if bot.soc / bot.max_soc >= OPPORTUNISTIC_CHARGE_SOC:                      
+    if bot.soc / bot.max_soc >= OPPORTUNISTIC_CHARGE_SOC:           # SoC is fine
         return False                                                           
                                                                                
     target = nearest_charger(bot, chargers)                                    
     if target is None:                                                         
         return False                                                           
     if _euclidean(bot.coordinates, target.coordinates) > \
-            OPPORTUNISTIC_CHARGE_RADIUS:                                       
+            OPPORTUNISTIC_CHARGE_RADIUS:                            # no charger close enough
         return False                                                           
                                                                                
     bot.charge(target)                                                         
@@ -196,7 +182,7 @@ def try_opportunistic_charge(bot, chargers):
 # slightly heavier pizza doesn't push the bot over capacity.
 PAYLOAD_FILL_TARGET = 0.95                                                     
 
-
+#loads as many ready pizzas onto a bot until max_payload is reached
 def load_bot_to_capacity(bot, deliverables):                                   
     capacity = getattr(bot, 'max_payload', 0)                                  
     if capacity <= 0:                                                          
@@ -210,7 +196,7 @@ def load_bot_to_capacity(bot, deliverables):
             continue                                                           
         p_weight = getattr(pizza, 'weight', 0) or 0                            
                                                                                
-        # Skip pizzas that would push us over max_payload; keep iterating in   
+        # Skip pizzas that would push us over max_payload. keep iterating in   
         # case a lighter one further down the list still fits.                 
         if planned_load + p_weight > capacity:                                 
             continue                                                           
@@ -241,7 +227,7 @@ charger = es.chargers()[0]
 es.display(show=0, pause=10)
 es.debug       = False                  # damage / warning messages (needs show=0)
 es.messages_on = False                  # for 52 weeks; turn on for short runs
-es.duration    = "2 week"              # aim for a year with few breakages
+es.duration    = "52 week"              # aim for a year with few breakages
 
 # Home is the point bots return to when idle; also the charger location here.
 home = [40, 20, 0]
