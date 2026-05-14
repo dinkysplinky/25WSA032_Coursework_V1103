@@ -223,7 +223,7 @@ home = [40, 20, 0]
 
 # SoC percentage at which bots decide to charge. Can be optimised per kind
 # (stretch objective).
-charge_threshold = 0.20
+charge_threshold = 0.1
 
 while es.active:
 
