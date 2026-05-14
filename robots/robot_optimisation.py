@@ -1,17 +1,17 @@
 # AI GENERATED TEXT: Single source of truth for whether to render the arena.
 # Set SHOW = 1 to use the normal interactive display.
-#SHOW = 0                                                                       
- 
+SHOW = 0
+
 # AI GENERATED TEXT: When SHOW = 0, force matplotlib to the 'Agg' headless backend BEFORE
 # anything else imports it (the factory imports matplotlib internally, and
 # the backend is locked in on first import). This is what stops a figure
 # window from appearing when show=0.
-#import matplotlib                                                              
-#if not SHOW:                                                                   
-#    matplotlib.use('Agg')                                                      
+#import matplotlib
+#if not SHOW:
+#    matplotlib.use('Agg')
 
-# PLEASE READ: The code above was written with assistance 
-# from AI to generate solution to a technical issue 
+# PLEASE READ: The code above was written with assistance
+# from AI to generate solution to a technical issue
 # I was having where the virtual environment would always show
 # even after setting show to 0 in the es.display function.
 
@@ -151,19 +151,54 @@ def print_per_bot_table(es):
     print(f"\n{'=' * total_w}")
 
 
-def _euclidean(a, b):                                                              
-    n = min(len(a), len(b))                                                    
-    return sum((a[i] - b[i]) ** 2 for i in range(n)) ** 0.5                    
- 
- 
-def nearest_charger(bot, chargers):                                                                                                                  
-    chargers = list(chargers)                                                  
-    if not chargers:                                                           
-        return None                                                            
-    return min(                                                                
-        chargers,                                                              
-        key=lambda c: _euclidean(bot.coordinates, c.coordinates),              
-    )       
+def _euclidean(a, b):
+    n = min(len(a), len(b))
+    return sum((a[i] - b[i]) ** 2 for i in range(n)) ** 0.5
+
+
+def nearest_charger(bot, chargers):
+    chargers = list(chargers)
+    if not chargers:
+        return None
+    return min(
+        chargers,
+        key=lambda c: _euclidean(bot.coordinates, c.coordinates),
+    )
+
+
+# Payload utilisation tuning. Stop loading once the bot is at or above
+# this fraction of its max_payload - leaves a small safety margin so a
+# slightly heavier pizza doesn't push the bot over capacity.
+PAYLOAD_FILL_TARGET = 0.95                                                     
+
+
+def load_bot_to_capacity(bot, deliverables):                                   
+    capacity = getattr(bot, 'max_payload', 0)                                  
+    if capacity <= 0:                                                          
+        return 0.0                                                           
+                                                                               
+    planned_load = 0.0                                                         
+    fill_ceiling = PAYLOAD_FILL_TARGET * capacity                              
+                                                                               
+    for pizza in deliverables:                                                 
+        if pizza.status != 'ready':                                            
+            continue                                                           
+        p_weight = getattr(pizza, 'weight', 0) or 0                            
+                                                                               
+        # Skip pizzas that would push us over max_payload; keep iterating in   
+        # case a lighter one further down the list still fits.                 
+        if planned_load + p_weight > capacity:                                 
+            continue                                                           
+                                                                               
+        bot.deliver(pizza)                                                     
+        planned_load += p_weight                                               
+                                                                               
+        # Stop once close enough to full to avoid spending cycles        
+        # scanning for tiny leftovers.                                         
+        if planned_load >= fill_ceiling:                                       
+            break                                                              
+    return planned_load                                                        
+
 
 import matplotlib.pyplot as plt
 plt.close('all')        # optional: cleans up leftovers from prior runs
@@ -178,7 +213,7 @@ charger = es.chargers()[0]
 
 # show = 0  -> no display, fastest run; set 1 for development/debugging.
 # When show = 0 it is wise to turn messages on for shorter dev runs.
-es.display(show=1, pause=10)
+es.display(show=0, pause=10)
 es.debug       = False                  # damage / warning messages (needs show=0)
 es.messages_on = False                  # for 52 weeks; turn on for short runs
 es.duration    = "2 week"              # aim for a year with few breakages
@@ -198,17 +233,14 @@ while es.active:
 
         # Decide to charge when soc < threshold and not already at a station.
         if bot.soc / bot.max_soc < charge_threshold and bot.station is None:
-            target = nearest_charger(bot, es.chargers())                       
-            if target is not None:                                             
-                bot.charge(target)  
+            target = nearest_charger(bot, es.chargers())
+            if target is not None:
+                bot.charge(target)
 
         # If idle, contract to deliver a ready pizza.
         if bot.activity == 'idle':
-            for pizza in es.deliverables():
-                if pizza.status == 'ready':
-                    bot.deliver(pizza)   # avoid contracting a pizza already taken
-                    break
-            # If no ready pizza was found, head home.
+            load_bot_to_capacity(bot, es.deliverables())                        
+            # If no pizza was loaded, head home as before.
             if not bot.destination and bot.coordinates != home:
                 bot.target_destination = home
 
